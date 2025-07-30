@@ -1,0 +1,36 @@
+﻿@inherits LayoutComponentBase
+@inject NavigationManager Nav
+
+<div class="page">
+    <div class="sidebar">
+        <NavMenu />
+    </div>
+
+    <main>
+        <div class="top-row ps-3 navbar navbar-light bg-white text-black border-bottom border-1 border-secondary-subtle shadow-sm">
+            <div class="container-fluid justify-content-end">
+                <NavLink class="nav-link fs-5 text-black text-decoration-none" href="#" target="_blank">
+                    Hello @user
+                </NavLink>
+            </div>
+        </div>
+
+        <article class="content px-4">
+            @Body
+        </article>
+    </main>
+</div>
+
+@code {
+    private string user = "Guest";
+
+    protected override void OnInitialized()
+    {
+        var query = System.Web.HttpUtility.ParseQueryString(new Uri(Nav.Uri).Query);
+        var u = query.Get("user");
+        if (!string.IsNullOrWhiteSpace(u))
+        {
+            user = u;
+        }
+    }
+}

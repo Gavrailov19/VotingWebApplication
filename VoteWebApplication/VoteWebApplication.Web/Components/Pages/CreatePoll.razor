@@ -1,0 +1,117 @@
+﻿@page "/create-poll"
+@rendermode InteractiveServer
+@using System.ComponentModel.DataAnnotations
+@using VoteWebApplication.ServiceDefaults.Shared.Models
+@using Microsoft.AspNetCore.SignalR.Client
+@using Microsoft.AspNetCore.WebUtilities
+@inject NavigationManager Nav
+@inject IHttpClientFactory Clients
+@inject IHttpClientFactory Clients
+
+<PageTitle>Create Poll</PageTitle>
+
+<h1 class="mb-4">Create a New Poll</h1>
+
+<EditForm Model="@poll" OnValidSubmit="SubmitPoll" class="poll-builder">
+    <DataAnnotationsValidator />
+    <ValidationSummary />
+
+    <!-- Question -->
+    <div class="mb-4">
+        <label class="form-label fw-semibold">Poll Question</label>
+        <InputText class="form-control form-control-lg shadow-sm" placeholder="input question" @bind-Value="poll.Question" maxlength="120" />
+    </div>
+
+    <!-- Options -->
+    <div class="mb-3">
+        <label class="form-label fw-semibold">Options <span class="text-muted">(2 – 5)</span></label>
+
+        @foreach (var option in poll.Options)
+        {
+            <div class="input-group option-row mb-2" @key="option.Id">
+                <InputText class="form-control"
+                           placeholder="Input Option"
+                           maxlength="60"
+                           @bind-Value="option.Text" />
+
+                <button type="button"
+                        class="btn btn-outline-danger"
+                        title="Remove"
+                        disabled="@(poll.Options.Count <= 2)"
+                        @onclick="() => RemoveOption(option.Id)">
+                    <i class="bi bi-x-lg"></i> X
+                </button>
+            </div>
+        }
+
+        <button type="button" class="btn btn-danger-subtle text-danger-emphasis mt-2"
+                @onclick="AddOption"
+                disabled="@(poll.Options.Count >= 5)">
+            <i class="bi bi-plus-lg me-1"></i> Add Option
+        </button>
+    </div>
+
+    <!-- Submit -->
+    <div class="text-end">
+        <button type="submit" class="btn btn-danger px-4"
+                disabled="@(poll.Options.Count < 2)">
+            Create Poll
+        </button>
+    </div>
+</EditForm>
+
+@code {
+    private PollModel poll = new();
+    private HubConnection? hub;
+
+    protected override async Task OnInitializedAsync()
+    {
+        AddOption();
+        AddOption();
+
+        var apiBase = Clients.CreateClient("PollApi").BaseAddress?.ToString().TrimEnd('/')!;
+        hub = new HubConnectionBuilder()
+            .WithUrl(apiBase + "/votingHub")
+            .Build();
+        await hub.StartAsync();
+    }
+
+    public void AddOption()
+    {
+        if (poll.Options.Count >= 5) return;
+        poll.Options.Add(new PollOptionModel
+        {
+            Id = Guid.NewGuid(),
+            Text = string.Empty
+        });
+    }
+
+    void RemoveOption(Guid id)
+    {
+        if (poll.Options.Count <= 2) return;
+        var option = poll.Options.FirstOrDefault(o => o.Id == id);
+        if (option != null) poll.Options.Remove(option);
+    }
+
+    string? user => QueryHelpers.ParseQuery(new Uri(Nav.Uri).Query).GetValueOrDefault("user", "Anonymous");
+
+    async Task SubmitPoll()
+    {
+        var pollId = Guid.NewGuid().ToString();
+
+        var request = new CreateRequestPollModel
+        {
+            Question = poll.Question,
+            Options = poll.Options.Select(o => o.Text).
+                        Where(t => !string.IsNullOrWhiteSpace(t)).ToList(),
+            User = user
+        };
+        var api = Clients.CreateClient("PollApi");
+        var resp = await api.PostAsJsonAsync($"api/poll/create?id={pollId}", request);
+        if (resp.IsSuccessStatusCode)
+        {
+            await hub!.SendAsync("JoinPoll", pollId);
+            Nav.NavigateTo($"/?user={Uri.EscapeDataString(user!)}&pollId={pollId}");
+        }
+    }
+}

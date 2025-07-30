@@ -1,0 +1,125 @@
+﻿@page "/"
+@rendermode InteractiveServer
+@using Microsoft.AspNetCore.SignalR.Client
+@using Microsoft.AspNetCore.WebUtilities
+@using VoteWebApplication.ServiceDefaults.Shared.Models
+@inject NavigationManager Nav
+@inject IHttpClientFactory Clients
+
+<h1 class="mb-4">Todays Votings</h1>
+
+@if (string.IsNullOrEmpty(userName))
+{
+    <p class="text-danger">To vote please add to the url your username in this way <code>?user=YourName</code> </p>
+}
+else
+{
+    @foreach (var poll in allPolls)
+    {
+        var total = poll.Options.Sum(o => o.Votes);
+        <div class="poll-stack mb-4">
+            <div class="poll">
+                <div class="poll-header d-flex justify-content-between align-items-center">
+                    <span class="fw-semibold">@poll.Question</span>
+                    <span class="badge live-badge">LIVE</span>
+                </div>
+
+                @foreach (var option in poll.Options)
+                {
+                    var votesForOptionInPercent = total > 0 ? option.Votes * 100 / total : 0;
+                    var isOptionHasTheHighestVote = poll.Options.Any(x => x.Votes > option.Votes);
+                    var isSelected = selectedOption.TryGetValue(poll.Id.ToString(), out var sel) && sel == option.Text;
+
+                    <div class="poll-option @(isOptionHasTheHighestVote ? "dominant" : "") @(isSelected ? "selected" : "")"
+                         style="--w:@votesForOptionInPercent; cursor: pointer;"
+                         @onclick="async () => await OnVote(poll.Id.ToString(), option.Text)">
+                        <span class="label">@option.Text</span>
+                        <div class="bar"></div>
+                        <span class="pct">@votesForOptionInPercent&nbsp;%</span>
+                    </div>
+                }
+
+                <div class="poll-footer text-end small">
+                    @if (selectedOption.TryGetValue(poll.Id.ToString(), out var votedText))
+                    {
+                        <div class="mb-1"><em>You voted for <strong>@votedText</strong>.</em></div>
+                    }
+                    <div>Created by @poll.User • Total votes: @total</div>
+                </div>
+            </div>
+        </div>
+    }
+}
+
+@code {
+    private HubConnection? hub;
+    private string userName = "";
+    private Dictionary<string, string> selectedOption = new();
+    private List<PollResultModel> allPolls = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        var uri = Nav.ToAbsoluteUri(Nav.Uri);
+        QueryHelpers.ParseQuery(uri.Query).TryGetValue("user", out var userName);
+
+        var apiBase = Clients.CreateClient("PollApi").BaseAddress!.ToString().TrimEnd('/');
+        hub = new HubConnectionBuilder().WithUrl($"{apiBase}/votingHub").Build();
+
+        hub.On<PollResultModel>("PollCreated", poll =>
+        {
+            return InvokeAsync(() =>
+            {
+                allPolls.Add(poll);
+                hub.SendAsync("JoinPoll", poll.Id.ToString());
+                StateHasChanged();
+            });
+        });
+
+        hub.On<Dictionary<string, int>, string>("ReceiveResults", (tally, pollId) =>
+        {
+            return InvokeAsync(() =>
+            {
+                var poll = allPolls.FirstOrDefault(p => p.Id.ToString() == pollId);
+                if (poll is not null)
+                {
+                    foreach (var opt in poll.Options)
+                        opt.Votes = tally.TryGetValue(opt.Text, out var v) ? v : 0;
+                }
+                StateHasChanged();
+            });
+        });
+
+        await hub.StartAsync();
+
+        var api = Clients.CreateClient("PollApi");
+        var polls = await api.GetFromJsonAsync<List<PollResultModel>>("api/poll/getall");
+        if (polls != null)
+        {
+            allPolls = polls;
+            foreach (var poll in allPolls)
+            {
+                if (poll.Results != null)
+                {
+                    foreach (var opt in poll.Options)
+                    {
+                        opt.Votes = poll.Results.TryGetValue(opt.Text, out int v) ? v : 0;
+                    }
+                }
+                await hub.SendAsync("JoinPoll", poll.Id.ToString());
+            }
+            StateHasChanged();
+        }
+    }
+
+    private async Task OnVote(string pollId, string option)
+    {
+        if (selectedOption.TryGetValue(pollId, out var prev) && prev == option)
+        {
+            return;
+        }
+
+        await hub!.SendAsync("Vote", pollId, userName, option);
+        selectedOption[pollId] = option;
+        StateHasChanged();
+    }
+}

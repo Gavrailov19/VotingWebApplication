@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <Sdk Name="Aspire.AppHost.Sdk" Version="9.3.1" />
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <UserSecretsId>f13ec6e0-97ea-4eb6-ab92-5b9e2fe2f199</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\VoteWebApplication.ApiService\VoteWebApplication.ApiService.csproj" />
+    <ProjectReference Include="..\VoteWebApplication.Web\VoteWebApplication.Web.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Aspire.Hosting.AppHost" Version="9.3.1" />
+    <PackageReference Include="Aspire.Hosting.Redis" Version="9.3.1" />
+    <PackageReference Include="Microsoft.Extensions.ServiceDiscovery" Version="9.3.1" />
+    <PackageReference Include="OpenTelemetry" Version="1.12.0" />
+  </ItemGroup>
+
+</Project>
