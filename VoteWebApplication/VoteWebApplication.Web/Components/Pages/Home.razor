@@ -60,7 +60,8 @@ else
     protected override async Task OnInitializedAsync()
     {
         var uri = Nav.ToAbsoluteUri(Nav.Uri);
-        QueryHelpers.ParseQuery(uri.Query).TryGetValue("user", out var userName);
+        QueryHelpers.ParseQuery(uri.Query).TryGetValue("user", out var user);
+        userName = user;
 
         var apiBase = Clients.CreateClient("PollApi").BaseAddress!.ToString().TrimEnd('/');
         hub = new HubConnectionBuilder().WithUrl($"{apiBase}/votingHub").Build();
