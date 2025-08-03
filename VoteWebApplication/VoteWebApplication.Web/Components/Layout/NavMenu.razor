@@ -1,4 +1,6 @@
-﻿<div class="top-row ps-3 navbar navbar-light bg-white text-black border-bottom border-1 border-secondary-subtle shadow-sm">
+﻿@using Microsoft.AspNetCore.WebUtilities
+@inject NavigationManager Nav
+<div class="top-row ps-3 navbar navbar-light bg-white text-black border-bottom border-1 border-secondary-subtle shadow-sm">
     <div class="container-fluid">
         <a class="navbar-brand d-flex align-items-center gap-2 fs-5" href="/">
             <img src="/lib/EgtIcon.png" class="h-100 img-fluid" style="max-height:40px" alt="EGT Icon">
@@ -12,10 +14,26 @@
 <div class="nav-scrollable bg-light" onclick="document.querySelector('.navbar-toggler').click()">
     <nav class="nav flex-column">
         <div class="nav-item px-3">
-            <NavLink class="nav-link text-dark" href="" Match="NavLinkMatch.All">Home Page</NavLink>
+            <NavLink class="nav-link text-dark" href="@LinkWithUser("/")" Match="NavLinkMatch.All">Home Page</NavLink>
         </div>
         <div class="nav-item px-3">
-            <NavLink class="nav-link text-dark" href="create-poll">Create Voting Pole</NavLink>
+            <NavLink class="nav-link text-dark" href="@LinkWithUser("create-poll")">Create Voting Poll</NavLink>
         </div>
     </nav>
 </div>
+
+@code {
+    private string _userName = "";
+
+    protected override Task OnInitializedAsync()
+    {
+        Uri uri = Nav.ToAbsoluteUri(Nav.Uri);
+        _userName = QueryHelpers.ParseQuery(uri.Query).GetValueOrDefault("user", "").ToString();
+        return Task.CompletedTask;
+    }
+
+    string LinkWithUser(string path)
+    {
+        return string.IsNullOrWhiteSpace(_userName) ? path : $"{path}?user={Uri.EscapeDataString(_userName)}";
+    }
+}

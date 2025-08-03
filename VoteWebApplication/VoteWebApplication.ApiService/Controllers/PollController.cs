@@ -14,7 +14,7 @@ namespace VoteWebApplication.ApiService.Controllers
         private readonly IGrainFactory _grains;
 
         // In-memory poll store
-        private static readonly ConcurrentDictionary<string, PollModel> _polls = new();
+        private static readonly ConcurrentDictionary<string, PollResultModel> _polls = new();
 
         public PollController(IGrainFactory grains)
         {
@@ -39,13 +39,12 @@ namespace VoteWebApplication.ApiService.Controllers
                 return Conflict("Poll already exists or invalid state.");
             }
 
-            var model = new PollModel
+            var model = new PollResultModel
             {
-                Id = Guid.Parse(pollId),
-                Question = req.Question,
-                CreatedAt = DateTime.UtcNow,
+                Id = pollId,
+                Question = req.Question!,
                 Options = req.Options.Select(o => new PollOptionModel { Id = Guid.NewGuid(), Text = o, Votes = 0 }).ToList(),
-                User = req.CreatedByUser,
+                CreatedByUser = req.CreatedByUser!,
                 isVoteActive = true,
             };
             _polls[pollId] = model;
@@ -54,9 +53,9 @@ namespace VoteWebApplication.ApiService.Controllers
         }
 
         [HttpGet("getall")]
-        public async Task<ActionResult<PollListItemModel>> GetVotingPolls([FromQuery] string? user = null)
+        public async Task<ActionResult<PollResultModel>> GetVotingPolls([FromQuery] string? user = null)
         {
-            List<PollListItemModel> list = new();
+            List<PollResultModel> list = new();
             string? userChoice = null;
             foreach (var poll in _polls)
             {
@@ -65,14 +64,13 @@ namespace VoteWebApplication.ApiService.Controllers
                 {
                     userChoice = await _grains.GetGrain<IVoteGrain>(poll.Key).GetUserVote(user);
                 }
-                list.Add(new PollListItemModel
+                list.Add(new PollResultModel
                 {
                     Id = poll.Key,
                     Question = poll.Value.Question,
                     Options = poll.Value.Options,
-                    CreatedAt = poll.Value.CreatedAt,
-                    CreatedByUser = poll.Value.User,
-                    Results = results,
+                    CreatedByUser = poll.Value.CreatedByUser,
+                    VotingResults = results,
                     LoggedUserChoice = userChoice,
                     isVoteActive = poll.Value.isVoteActive,
                 });
