@@ -13,9 +13,6 @@ namespace VoteWebApplication.ServiceDefaults.Shared.Models
 
         public List<string> Options { get; set; } = new();
 
-        [Required]
-        public DateOnly Date { get; set; } = DateOnly.FromDateTime(DateTime.Today);
-
-        public string? User { get; set; }
+        public string? CreatedByUser { get; set; }
     }
 }

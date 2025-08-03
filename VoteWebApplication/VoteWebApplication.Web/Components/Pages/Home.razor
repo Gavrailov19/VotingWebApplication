@@ -8,119 +8,240 @@
 
 <h1 class="mb-4">Todays Votings</h1>
 
-@if (string.IsNullOrEmpty(userName))
+<h2 class="mb-4">Time: @_timeRightNow</h2>
+
+@if (string.IsNullOrEmpty(_userName) || _userName.ToLower() == "clock" || _userName.ToLower() == "system")
 {
-    <p class="text-danger">To vote please add to the url your username in this way <code>?user=YourName</code> </p>
+    <p class="text-danger">To vote please add to the url your username in this way <code>?user=YourName</code> 
+        <br />Don't use usernames clock and system, they are special
+    </p>
 }
 else
 {
-    @foreach (var poll in allPolls)
-    {
-        var total = poll.Options.Sum(o => o.Votes);
-        <div class="poll-stack mb-4">
+    @foreach (var poll in _allPolls)
+    {        
+        int total = poll.Options.Sum(o => o.Votes);
+        <div class="@($"poll-stack mb-4 {(poll.isVoteActive ? "" : "poll-closed")}")">
             <div class="poll">
                 <div class="poll-header d-flex justify-content-between align-items-center">
                     <span class="fw-semibold">@poll.Question</span>
-                    <span class="badge live-badge">LIVE</span>
+                    <span class="badge @(poll.isVoteActive ? "live-badge" : "bg-secondary")">
+                        @(poll.isVoteActive ? "LIVE" : "CLOSED")
+                    </span>
                 </div>
 
                 @foreach (var option in poll.Options)
                 {
                     var votesForOptionInPercent = total > 0 ? option.Votes * 100 / total : 0;
-                    var isOptionHasTheHighestVote = poll.Options.Any(x => x.Votes > option.Votes);
-                    var isSelected = selectedOption.TryGetValue(poll.Id.ToString(), out var sel) && sel == option.Text;
+                    var isDominant = poll.Options.Any(x => x.Votes > option.Votes);
+                    var isSelected = _selectedOptions.TryGetValue(poll.Id, out var sel)
+                    && sel == option.Text;
 
-                    <div class="poll-option @(isOptionHasTheHighestVote ? "dominant" : "") @(isSelected ? "selected" : "")"
-                         style="--w:@votesForOptionInPercent; cursor: pointer;"
-                         @onclick="async () => await OnVote(poll.Id.ToString(), option.Text)">
-                        <span class="label">@option.Text</span>
-                        <div class="bar"></div>
-                        <span class="pct">@votesForOptionInPercent&nbsp;%</span>
-                    </div>
-                }
+                    <div class="poll-option
+                            @(isDominant ? " dominant" : "")
+                            @(isSelected ? " selected" : "")
+                            @(poll.isVoteActive ? "" : " disabled")"
+                         style="--w:@votesForOptionInPercent;@(poll.isVoteActive ? " cursor: pointer;" : "")"
+                         @onclick="async () => {
+                         if (poll.isVoteActive)
+                         {
+                             await OnVote(poll.Id, option.Text);
+                         }
+                     }">
+                      <span class="label">@option.Text</span>
+                      <div class="bar"></div>
+                      <span class="pct">@votesForOptionInPercent&nbsp;%</span>
+                  </div>
+            }
 
                 <div class="poll-footer text-end small">
-                    @if (selectedOption.TryGetValue(poll.Id.ToString(), out var votedText))
+                    @if (_selectedOptions.TryGetValue(poll.Id.ToString(), out var votedText))
                     {
                         <div class="mb-1"><em>You voted for <strong>@votedText</strong>.</em></div>
                     }
-                    <div>Created by @poll.User • Total votes: @total</div>
+                    <div>Created by @poll.CreatedByUser • Total votes: @total</div>
                 </div>
+                @if (poll.isVoteActive && poll.CreatedByUser == _userName)
+                {
+                    <button class="btn btn-sm btn-outline-danger mt-2"
+                            @onclick="() => CloseVotingsForPoll(poll.Id)">
+                        <i class="bi bi-x-lg me-1"></i> Close Voting
+                    </button>
+                }
             </div>
         </div>
     }
 }
 
 @code {
-    private HubConnection? hub;
-    private string userName = "";
-    private Dictionary<string, string> selectedOption = new();
-    private List<PollResultModel> allPolls = new();
+    private HubConnection? _hub;
+    private string _userName = "";
+    private Dictionary<string, string> _selectedOptions = new();
+    private List<PollResultModel> _allPolls = new();
+    private DateTime _timeRightNow = DateTime.Now;
+    private System.Timers.Timer? _timer;
 
     protected override async Task OnInitializedAsync()
     {
-        var uri = Nav.ToAbsoluteUri(Nav.Uri);
-        QueryHelpers.ParseQuery(uri.Query).TryGetValue("user", out var user);
-        userName = user;
+        _userName = QueryHelpers.ParseQuery(new Uri(Nav.Uri).Query).GetValueOrDefault("user", "")!;
 
-        var apiBase = Clients.CreateClient("PollApi").BaseAddress!.ToString().TrimEnd('/');
-        hub = new HubConnectionBuilder().WithUrl($"{apiBase}/votingHub").Build();
+        StartClock();
 
-        hub.On<PollResultModel>("PollCreated", poll =>
+        await InitialisingConnectionHub();
+
+        HttpClient api = Clients.CreateClient("PollApi");
+        HttpResponseMessage resp = await api.GetAsync($"api/poll/getall?user={_userName}");
+
+        if (resp.IsSuccessStatusCode)
         {
-            return InvokeAsync(() =>
-            {
-                allPolls.Add(poll);
-                hub.SendAsync("JoinPoll", poll.Id.ToString());
-                StateHasChanged();
-            });
-        });
+            _allPolls = await resp.Content.ReadFromJsonAsync<List<PollResultModel>>() ?? new List<PollResultModel>();
 
-        hub.On<Dictionary<string, int>, string>("ReceiveResults", (tally, pollId) =>
-        {
-            return InvokeAsync(() =>
+            if (_allPolls.Count == 0)
             {
-                var poll = allPolls.FirstOrDefault(p => p.Id.ToString() == pollId);
-                if (poll is not null)
+                await CreateSystemVoting();
+                return;
+            }
+
+            foreach (var poll in _allPolls)
+            {
+                foreach (var opt in poll.Options)
                 {
-                    foreach (var opt in poll.Options)
-                        opt.Votes = tally.TryGetValue(opt.Text, out var v) ? v : 0;
+                    opt.Votes = poll.VotingResults.TryGetValue(opt.Text, out int numberOfVotes) ? numberOfVotes : 0;
                 }
-                StateHasChanged();
-            });
-        });
 
-        await hub.StartAsync();
-
-        var api = Clients.CreateClient("PollApi");
-        var polls = await api.GetFromJsonAsync<List<PollResultModel>>("api/poll/getall");
-        if (polls != null)
-        {
-            allPolls = polls;
-            foreach (var poll in allPolls)
-            {
-                if (poll.Results != null)
+                if (poll.LoggedUserChoice != null)
                 {
-                    foreach (var opt in poll.Options)
-                    {
-                        opt.Votes = poll.Results.TryGetValue(opt.Text, out int v) ? v : 0;
-                    }
+                    _selectedOptions[poll.Id] = poll.LoggedUserChoice;
                 }
-                await hub.SendAsync("JoinPoll", poll.Id.ToString());
+                await _hub!.SendAsync("RegisterPoll", poll.Id.ToString());
             }
             StateHasChanged();
         }
     }
 
-    private async Task OnVote(string pollId, string option)
+    private void StartClock()
     {
-        if (selectedOption.TryGetValue(pollId, out var prev) && prev == option)
+        _timer = new System.Timers.Timer(1000);
+        _timer.Elapsed += (_, __) =>
+        {
+            InvokeAsync(() =>
+            {
+                _timeRightNow = DateTime.Now;
+                StateHasChanged();
+            });
+        };
+        _timer.Start();
+    }
+
+
+    private async Task InitialisingConnectionHub()
+    {
+        var apiBase = Clients.CreateClient("PollApi").BaseAddress!.ToString().TrimEnd('/');
+        _hub = new HubConnectionBuilder().WithUrl($"{apiBase}/votingHub").Build();
+
+        // Receiving Real Time Votes!!!
+        _hub.On<Dictionary<string, int>, string>("ReceiveVotes", async (voteCountForOption, pollId) =>
+        {
+            // Preventing UI Thread Exception
+            await InvokeAsync(() =>
+            {
+                if (_allPolls.FirstOrDefault(p => p.Id == pollId) is PollResultModel poll)
+                {
+                    foreach (var opt in poll.Options)
+                    {
+                        opt.Votes = voteCountForOption.GetValueOrDefault(opt.Text);
+                    }
+                    StateHasChanged();
+                }
+            });
+        });
+
+        await _hub!.StartAsync();
+    }
+
+    private Task CloseVotingsForPoll(string pollId)
+    {
+        PollResultModel votingPollForDeleting = _allPolls.FirstOrDefault(p => p.Id == pollId)!;
+        if (votingPollForDeleting is PollResultModel poll)
+        {
+            poll.isVoteActive = false;
+        }
+
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(TimeSpan.FromMinutes(15));
+
+            await _hub!.SendAsync("DeregisterPoll", pollId);
+
+            var api = Clients.CreateClient("PollApi");
+
+            var resp = await api.DeleteAsync($"api/poll/delete?pollId={pollId}");
+
+            if (resp.IsSuccessStatusCode)
+            {
+                _allPolls.Remove(votingPollForDeleting);
+            }
+
+            StateHasChanged();
+        });
+        return Task.CompletedTask;
+    }
+
+    private async Task OnVote(string pollId, string selectedOption)
+    {
+        // The votes can be made for every five minute interval
+        if (_timeRightNow.Minute % 5 != 0)
         {
             return;
         }
 
-        await hub!.SendAsync("Vote", pollId, userName, option);
-        selectedOption[pollId] = option;
+        if (_selectedOptions.TryGetValue(pollId, out var previousOption) && previousOption == selectedOption)
+        {
+            return;
+        }
+
+        VotingModel voting = new()
+        {
+            Id = pollId,
+            UsernameOfTheVoter = _userName,
+            SelectedOption = selectedOption
+        };
+
+        await _hub!.SendAsync("RegisterVote", pollId, _userName, selectedOption);
+        _selectedOptions[pollId] = selectedOption;
         StateHasChanged();
+    }
+
+    private async Task CreateSystemVoting()
+    {
+        string pollId = Guid.NewGuid().ToString();
+
+        PollModel systemPoll = new();
+
+        systemPoll.Question = "Lunch time! Where are we going team?";
+
+        systemPoll.Options.AddRange(new[]
+        {
+            new PollOptionModel { Id = Guid.NewGuid(), Text = "The Kitchen" },
+            new PollOptionModel { Id = Guid.NewGuid(), Text = "For Sushi" },
+            new PollOptionModel { Id = Guid.NewGuid(), Text = "For Pizza" },
+            new PollOptionModel { Id = Guid.NewGuid(), Text = "To the bar" },
+            new PollOptionModel { Id = Guid.NewGuid(), Text = "I want to stay" }
+        });
+
+        CreateRequestPollModel request = new()
+        {
+            Question = systemPoll.Question,
+            Options = systemPoll.Options.Select(o => o.Text).ToList(),
+            CreatedByUser = "system",
+        };
+        HttpClient api = Clients.CreateClient("PollApi");
+        HttpResponseMessage resp = await api.PostAsJsonAsync($"api/poll/create?id={pollId}", request);
+        if (resp.IsSuccessStatusCode)
+        {
+            PollResultModel? resultModel = await resp.Content.ReadFromJsonAsync<PollResultModel>();
+            _allPolls.Add(resultModel!);
+            await _hub!.SendAsync("RegisterPoll", pollId);
+        }
     }
 }

@@ -1,4 +1,5 @@
 ﻿using Microsoft.AspNetCore.SignalR;
+using Orleans;
 using VoteWebApplication.ServiceDefaults.Shared;
 using VoteWebApplication.ServiceDefaults.Shared.Models;
 
@@ -12,49 +13,32 @@ namespace VoteWebApplication.ApiService.Voting
             _client = client;
         }
 
-        public async Task<bool> CreatePoll(string pollId, CreateRequestPollModel req)
-        {
-            IVoteGrain? grain = _client.GetGrain<IVoteGrain>(pollId);
-            bool isCreatedPollValid = await grain.CreatePoll(req.Date, req.Options, req.User ?? Context.ConnectionId);
-            if (!isCreatedPollValid)
-            {
-                return false;    
-            } 
-
-            await Groups.AddToGroupAsync(Context.ConnectionId, pollId);
-
-            Dictionary<string,int> votingResults = await grain.GetVotingCount();
-            PollResultModel model = new()
-            {
-                Id = pollId,
-                Question = req.Question!,
-                Options = req.Options.Select(option => new PollOptionModel { Text = option, Votes = votingResults[option] }).ToList(),
-                CreatedAt = DateTime.UtcNow,
-                User = req.User!,
-                Results = votingResults
-            };
-
-            await Clients.Group(pollId).SendAsync("PollCreated", model);
-            return true;
-        }
-
-        public async Task JoinPoll(string pollId)
+        public async Task RegisterPoll(string pollId)
         {
             await Groups.AddToGroupAsync(Context.ConnectionId, pollId);
-            IVoteGrain? grain = _client.GetGrain<IVoteGrain>(pollId);
-            Dictionary<string, int> votingResults = await grain.GetVotingCount();
-
-            await Clients.Caller.SendAsync("ReceiveResults", votingResults, pollId);
+            await GetVotes(pollId);
         }
 
-        public async Task Vote(string pollId, string user, string option)
+        public async Task DeregisterPoll(string pollId)
+        {
+            await Groups.RemoveFromGroupAsync(Context.ConnectionId, pollId);
+        }
+
+        public async Task RegisterVote(string pollId, string user, string option)
         {
             IVoteGrain? grain = _client.GetGrain<IVoteGrain>(pollId);
-            if (!await grain.Vote(user, option)) return;
+            await grain.Vote(user, option);
+            await GetVotes(pollId, grain);
+        }
 
+        public async Task GetVotes(string pollId, IVoteGrain? grain = null)
+        {
+            if (grain is null)
+            {
+                grain = _client.GetGrain<IVoteGrain>(pollId);
+            }
             Dictionary<string, int> votingResults = await grain.GetVotingCount();
-
-            await Clients.Group(pollId).SendAsync("ReceiveResults", votingResults, pollId);
+            await Clients.Group(pollId).SendAsync("ReceiveVotes", votingResults, pollId);
         }
     }
 }

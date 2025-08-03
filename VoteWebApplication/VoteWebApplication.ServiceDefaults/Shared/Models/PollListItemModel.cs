@@ -13,6 +13,8 @@ namespace VoteWebApplication.ServiceDefaults.Shared.Models
         public List<PollOptionModel> Options { get; set; } = new();
         public DateTime CreatedAt { get; set; }
         public Dictionary<string, int> Results { get; set; } = new();
-        public string? User { get; set; }
+        public string? CreatedByUser { get; set; }
+        public string? LoggedUserChoice { get; set; }
+        public bool isVoteActive { get; set; }
     }
 }

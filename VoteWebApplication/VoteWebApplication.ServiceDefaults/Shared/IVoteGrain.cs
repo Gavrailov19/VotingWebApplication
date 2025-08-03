@@ -9,8 +9,9 @@ namespace VoteWebApplication.ServiceDefaults.Shared
 {
     public interface IVoteGrain : IGrainWithStringKey
     {
-        Task<bool> CreatePoll(DateOnly date, List<string> places, string createdBy);
+        Task<bool> CreatePoll(List<string> places, string createdBy);
         Task<bool> Vote(string user, string place);
         Task<Dictionary<string, int>> GetVotingCount();
+        Task<string?> GetUserVote(string? user = null);
     }
 }

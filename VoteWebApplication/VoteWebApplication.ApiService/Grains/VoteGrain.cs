@@ -6,24 +6,30 @@ namespace VoteWebApplication.ApiService.Grains
     public sealed class VoteGrain : Grain, IVoteGrain
     {
         private bool _created;
-        private List<string> _places = new();
-        private readonly Dictionary<string, int> _tally = new();
+        private List<string> _options = new();
+        private readonly Dictionary<string, int> _voteCountByOption = new();
         private readonly Dictionary<string, string> _userVotes = new();
 
-        public Task<bool> CreatePoll(DateOnly date, List<string> places, string createdBy)
+        public Task<bool> CreatePoll(List<string> options, string createdBy)
         {
-            if (_created) return Task.FromResult(false);
+            if (_created)
+            {
+                return Task.FromResult(false);
+            }
             _created = true;
-            _places = places.ToList();
-            _tally.Clear();
-            foreach (var p in _places) _tally[p] = 0;
-            _userVotes.Clear();
+            _options = options.ToList();
+
+            foreach (var option in _options)
+            {
+                _voteCountByOption[option] = 0;
+            }
+
             return Task.FromResult(true);
         }
 
         public Task<bool> Vote(string user, string place)
         {
-            if (!_created || !_tally.ContainsKey(place))
+            if (!_created || !_voteCountByOption.ContainsKey(place))
             {
                 return Task.FromResult(false);
             }
@@ -35,14 +41,22 @@ namespace VoteWebApplication.ApiService.Grains
 
             if (_userVotes.TryGetValue(user, out prev))
             {
-                _tally[prev] = Math.Max(0, _tally[prev] - 1);
+                _voteCountByOption[prev] = Math.Max(0, _voteCountByOption[prev] - 1);
             }
 
-            _tally[place]++;
+            _voteCountByOption[place]++;
             _userVotes[user] = place;
             return Task.FromResult(true);
         }
 
-        public Task<Dictionary<string, int>> GetVotingCount() => Task.FromResult(_tally.ToDictionary(kvp => kvp.Key, kvp => kvp.Value));
+        public Task<Dictionary<string, int>> GetVotingCount()
+        {
+            return Task.FromResult(_voteCountByOption);
+        }
+
+        public Task<string?> GetUserVote(string? user)
+        {
+            return Task.FromResult(_userVotes.TryGetValue(user!, out var vote) ? vote : null);
+        }
     }
 }

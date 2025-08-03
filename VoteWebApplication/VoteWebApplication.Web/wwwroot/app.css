@@ -170,8 +170,26 @@ h1:focus {
         background: #fbdcdc;
     }
 
-/* remove‑option button tweaks */
 .option-row .btn-outline-danger {
     --bs-btn-hover-bg: var(--accent-red);
     --bs-btn-hover-border-color: var(--accent-red);
+}
+
+.poll-closed {
+    opacity: 0.6;
+    pointer-events: none;
+}
+
+.poll-option.disabled {
+    cursor: not-allowed !important;
+}
+
+.badge.bg-secondary {
+    background-color: #6c757d !important;
+    color: #fff;
+}
+
+.poll-option.disabled {
+    opacity: 0.6;
+    pointer-events: none;
 }

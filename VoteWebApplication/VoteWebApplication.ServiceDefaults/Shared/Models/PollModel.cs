@@ -13,5 +13,6 @@ namespace VoteWebApplication.ServiceDefaults.Shared.Models
 
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
         public string? User { get; set; }
+        public bool isVoteActive {  get; set; }
     }
 }

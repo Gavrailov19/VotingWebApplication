@@ -12,28 +12,27 @@ namespace VoteWebApplication.ApiService.Controllers
     public class PollController : ControllerBase
     {
         private readonly IGrainFactory _grains;
-        private readonly IHubContext<VotingHub> _hubContext;
 
         // In-memory poll store
         private static readonly ConcurrentDictionary<string, PollModel> _polls = new();
 
-        public PollController(IGrainFactory grains, IHubContext<VotingHub> hubContext)
+        public PollController(IGrainFactory grains)
         {
             _grains = grains;
-            _hubContext = hubContext;
         }
 
         [HttpPost("create")]
-        public async Task<IActionResult> Create([FromQuery] string id, [FromBody] CreateRequestPollModel req)
+        public async Task<IActionResult> Create([FromBody] CreateRequestPollModel req)
         {
-            if (req.Options.Count < 2 || req.Options.Count > 5)
+            if (req.Options.Count < 2)
             {
-                return BadRequest("Need 2–5 options");
+                return BadRequest("Need atleast 2 options");
             }
 
-            IVoteGrain? grain = _grains.GetGrain<IVoteGrain>(id);
+            string pollId = Guid.NewGuid().ToString();
+            IVoteGrain? grain = _grains.GetGrain<IVoteGrain>(pollId);
             DateOnly today = DateOnly.FromDateTime(DateTime.Today);
-            bool IsPollValid = await grain.CreatePoll(today, req.Options, req.User!);
+            bool IsPollValid = await grain.CreatePoll(req.Options, req.CreatedByUser!);
 
             if (!IsPollValid)
             {
@@ -42,61 +41,54 @@ namespace VoteWebApplication.ApiService.Controllers
 
             var model = new PollModel
             {
-                Id = Guid.Parse(id),
+                Id = Guid.Parse(pollId),
                 Question = req.Question,
                 CreatedAt = DateTime.UtcNow,
                 Options = req.Options.Select(o => new PollOptionModel { Id = Guid.NewGuid(), Text = o, Votes = 0 }).ToList(),
-                User = req.User
+                User = req.CreatedByUser,
+                isVoteActive = true,
             };
-            _polls[id] = model;
-
-            await _hubContext.Clients.Group(id).SendAsync("PollCreated", new PollResultModel
-            {
-                Id = id,
-                Question = model.Question!,
-                Options = model.Options,
-                CreatedAt = model.CreatedAt,
-                User = model.User!,
-                Results = model.Options.ToDictionary(o => o.Text, _ => 0)
-            });
+            _polls[pollId] = model;
 
             return Ok(model);
         }
 
-        [HttpPost("vote")]
-        public async Task<IActionResult> Vote([FromQuery] string id, [FromQuery] string user, [FromBody] string option)
-        {
-            var grain = _grains.GetGrain<IVoteGrain>(id);
-            bool isUserVotedValid = await grain.Vote(user, option);
-            if (!isUserVotedValid)
-            {
-                return BadRequest("Vote not allowed");
-            }
-
-            var votingCount = await grain.GetVotingCount();
-            await _hubContext.Clients.Group(id).SendAsync("ReceiveResults", votingCount, id);
-
-            return Ok();
-        }
-
         [HttpGet("getall")]
-        public async Task<ActionResult<IEnumerable<PollListItemModel>>> GetVotingPolls()
+        public async Task<ActionResult<PollListItemModel>> GetVotingPolls([FromQuery] string? user = null)
         {
-            var list = new List<PollListItemModel>();
+            List<PollListItemModel> list = new();
+            string? userChoice = null;
             foreach (var poll in _polls)
             {
-                var results = await _grains.GetGrain<IVoteGrain>(poll.Key).GetVotingCount();
+                Dictionary<string,int> results = await _grains.GetGrain<IVoteGrain>(poll.Key).GetVotingCount();
+                if (user is not null)
+                {
+                    userChoice = await _grains.GetGrain<IVoteGrain>(poll.Key).GetUserVote(user);
+                }
                 list.Add(new PollListItemModel
                 {
                     Id = poll.Key,
                     Question = poll.Value.Question,
                     Options = poll.Value.Options,
                     CreatedAt = poll.Value.CreatedAt,
-                    User = poll.Value.User,
-                    Results = results
+                    CreatedByUser = poll.Value.User,
+                    Results = results,
+                    LoggedUserChoice = userChoice,
+                    isVoteActive = poll.Value.isVoteActive,
                 });
             }
             return Ok(list);
+        }
+
+        [HttpDelete("delete")]
+        public IActionResult RemoveVotingPolls([FromQuery] string pollId)
+        {
+            if (!_polls.TryRemove(pollId, out _))
+            {
+                return NotFound();
+            }
+
+            return NoContent();
         }
     }
 }

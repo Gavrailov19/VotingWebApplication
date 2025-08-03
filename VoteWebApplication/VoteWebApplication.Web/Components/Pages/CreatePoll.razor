@@ -45,8 +45,7 @@
         }
 
         <button type="button" class="btn btn-danger-subtle text-danger-emphasis mt-2"
-                @onclick="AddOption"
-                disabled="@(poll.Options.Count >= 5)">
+                @onclick="AddOption">
             <i class="bi bi-plus-lg me-1"></i> Add Option
         </button>
     </div>
@@ -78,7 +77,6 @@
 
     public void AddOption()
     {
-        if (poll.Options.Count >= 5) return;
         poll.Options.Add(new PollOptionModel
         {
             Id = Guid.NewGuid(),
@@ -88,30 +86,30 @@
 
     void RemoveOption(Guid id)
     {
-        if (poll.Options.Count <= 2) return;
         var option = poll.Options.FirstOrDefault(o => o.Id == id);
-        if (option != null) poll.Options.Remove(option);
+        if (option != null)
+        {
+            poll.Options.Remove(option);
+        }
     }
 
     string? user => QueryHelpers.ParseQuery(new Uri(Nav.Uri).Query).GetValueOrDefault("user", "Anonymous");
 
     async Task SubmitPoll()
     {
-        var pollId = Guid.NewGuid().ToString();
-
         var request = new CreateRequestPollModel
         {
             Question = poll.Question,
-            Options = poll.Options.Select(o => o.Text).
-                        Where(t => !string.IsNullOrWhiteSpace(t)).ToList(),
-            User = user
+            Options = poll.Options.Select(o => o.Text).Where(t => !string.IsNullOrWhiteSpace(t)).ToList(),
+            CreatedByUser = user
         };
         var api = Clients.CreateClient("PollApi");
-        var resp = await api.PostAsJsonAsync($"api/poll/create?id={pollId}", request);
+        var resp = await api.PostAsJsonAsync($"api/poll/create", request);
         if (resp.IsSuccessStatusCode)
         {
-            await hub!.SendAsync("JoinPoll", pollId);
-            Nav.NavigateTo($"/?user={Uri.EscapeDataString(user!)}&pollId={pollId}");
+            PollResultModel? createdPoll = await resp.Content.ReadFromJsonAsync<PollResultModel>();
+            await hub!.SendAsync("RegisterPoll", createdPoll?.Id);
+            Nav.NavigateTo($"/?user={Uri.EscapeDataString(user!)}&pollId={createdPoll?.Id}");
         }
     }
 }
